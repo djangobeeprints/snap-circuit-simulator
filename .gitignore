@@ -1,0 +1,3 @@
+# The readable app source is kept off GitHub; only the encrypted build (index.html) is published.
+src/
+node_modules/

@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Snap Circuits Simulator</title>
+<style>
+  :root { --bg: #1b2836; --card: #203244; --text: #fff; --muted: #b8c7d6; --accent: #ffd54f; --btn: #23a55a; --err: #ff6b6b; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh; padding: 16px;
+  }
+  .card {
+    background: var(--card); border-radius: 28px; padding: clamp(24px, 5vh, 56px);
+    width: min(100%, 900px); box-shadow: 0 20px 60px rgba(0,0,0,.4);
+    font-size: clamp(18px, 2.6vh, 32px);
+  }
+  h1 { margin: 0 0 .3em; font-size: 2em; }
+  h1 span { color: var(--accent); }
+  .sub { margin: 0 0 1em; color: var(--muted); }
+  form { display: flex; gap: .5em; flex-wrap: wrap; }
+  input[type=password] {
+    flex: 1; min-width: 0; font: inherit; font-size: 1.3em; letter-spacing: .15em;
+    padding: .45em .7em; border-radius: 16px; border: 3px solid #4d6d8c; background: #0b141c; color: #fff;
+  }
+  input[type=password]:focus { outline: none; border-color: var(--accent); }
+  button {
+    font: inherit; font-size: 1.2em; font-weight: 800; color: #fff; background: var(--btn);
+    border: 0; border-radius: 16px; padding: .45em 1.2em; cursor: pointer;
+  }
+  button:disabled { opacity: .6; cursor: wait; }
+  .remember { display: flex; align-items: center; gap: .5em; margin-top: .8em; color: var(--muted); }
+  .remember input { width: 1.2em; height: 1.2em; }
+  #err { min-height: 1.4em; margin: .6em 0 0; color: var(--err); font-weight: 700; }
+  .disclaimer {
+    margin-top: 1.2em; padding: 1em 1.2em; border-radius: 16px;
+    background: #2d2410; border: 3px solid var(--accent); line-height: 1.4; font-size: .85em;
+  }
+  .disclaimer strong { color: var(--accent); }
+</style>
+</head>
+<body>
+<main class="card">
+  <h1>⚡ Snap Circuits <span>Simulator</span></h1>
+  <p class="sub">Enter the class password to start building.</p>
+  <form id="f">
+    <input id="pw" type="password" autocomplete="current-password" autocapitalize="characters" placeholder="Password" aria-label="Password" autofocus>
+    <button id="go" type="submit">Unlock</button>
+  </form>
+  <label class="remember"><input type="checkbox" id="rem" checked> Remember on this device</label>
+  <p id="err" role="alert"></p>
+  <section class="disclaimer">
+    <strong>⚠️ Educational experiment.</strong> This simulator is an independent classroom project made for learning.
+    It is not affiliated with, sponsored by, or endorsed by Elenco Electronics or the Snap Circuits® brand.
+    Circuits are simplified and may not behave exactly like real parts — always follow the instructions that came with a real kit.
+  </section>
+</main>
+<script>
+"use strict";
+// The app is stored encrypted (AES-GCM, key from PBKDF2 of the password).
+// Neither the password nor the app's code appears in this file.
+const PAYLOAD = /*PAYLOAD*/null;
+const KEY_STORE = 'snap.gate.key';
+const b64 = s => Uint8Array.from(atob(s), ch => ch.charCodeAt(0));
+const toB64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
+
+async function deriveKey(password) {
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: b64(PAYLOAD.salt), iterations: PAYLOAD.iter, hash: 'SHA-256' },
+    base, { name: 'AES-GCM', length: 256 }, true, ['decrypt']);
+}
+async function openApp(key) {
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64(PAYLOAD.iv) }, key, b64(PAYLOAD.data));
+  const html = new TextDecoder().decode(plain);
+  document.open(); document.write(html); document.close();
+}
+async function tryRemembered() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(KEY_STORE) || 'null');
+    if (!saved || saved.salt !== PAYLOAD.salt) return;
+    const key = await crypto.subtle.importKey('raw', b64(saved.key), 'AES-GCM', false, ['decrypt']);
+    await openApp(key);
+  } catch (e) { try { localStorage.removeItem(KEY_STORE); } catch (_) { /* ignore */ } }
+}
+
+const f = document.getElementById('f'), pw = document.getElementById('pw'), go = document.getElementById('go'), err = document.getElementById('err');
+f.addEventListener('submit', async e => {
+  e.preventDefault();
+  if (!window.crypto || !crypto.subtle) { err.textContent = 'This browser can’t unlock the app (needs a secure https page).'; return; }
+  go.disabled = true; err.textContent = ''; go.textContent = 'Unlocking…';
+  try {
+    const key = await deriveKey(pw.value.trim().toUpperCase());
+    const remember = document.getElementById('rem').checked;   // read before the page is replaced
+    const raw = await crypto.subtle.exportKey('raw', key);
+    await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64(PAYLOAD.iv) }, key, b64(PAYLOAD.data)); // throws if wrong
+    if (remember) {
+      try { localStorage.setItem(KEY_STORE, JSON.stringify({ salt: PAYLOAD.salt, key: toB64(raw) })); } catch (_) { /* storage unavailable */ }
+    }
+    await openApp(key);
+  } catch (e2) {
+    err.textContent = 'That password isn’t right. Try again!';
+    go.disabled = false; go.textContent = 'Unlock'; pw.select();
+  }
+});
+tryRemembered();
+</script>
+</body>
+</html>
