@@ -77,7 +77,13 @@ async function deriveKey(password) {
 async function openApp(key) {
   const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64(PAYLOAD.iv) }, key, b64(PAYLOAD.data));
   const html = new TextDecoder().decode(plain);
-  document.open(); document.write(html); document.close();
+  // Show the app in a full-window iframe: document.write into this page would re-run the app's
+  // top-level const/let declarations in a window that already has them ("Identifier already declared").
+  const frame = document.createElement('iframe');
+  frame.setAttribute('allow', 'fullscreen');
+  frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0;background:#fff;z-index:2147483647';
+  frame.srcdoc = html;
+  document.body.appendChild(frame);
 }
 async function tryRemembered() {
   try {
